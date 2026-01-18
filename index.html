@@ -29,6 +29,7 @@
                     },
                     animation: {
                         'flash-soft': 'flashSoft 0.3s ease-out forwards',
+                        'bounce-slow': 'bounce 3s infinite',
                     },
                     keyframes: {
                         flashSoft: {
@@ -68,7 +69,7 @@
         @media print {
             @page {
                 margin: 0;
-                size: auto; /* Let content dictate size */
+                size: auto; 
             }
             body, html {
                 margin: 0; padding: 0;
@@ -85,21 +86,20 @@
                 background: white;
             }
             #canvas-wrapper { 
-                position: static !important; /* Reset positioning */
+                position: static !important; 
                 transform: none !important;
                 box-shadow: none !important; border: none !important;
                 margin: 0 !important; padding: 0 !important;
                 display: block;
             }
             #main-canvas { 
-                /* Force canvas to print at exact pixels if possible, or fit to page */
                 max-width: 100%; max-height: 100vh;
                 width: auto !important; height: auto !important;
                 object-fit: contain;
                 visibility: visible !important;
             }
-            /* Hide controls when printing */
-            .edit-controls, .header-bar, #flash-effect, #toast, #upload-overlay, .print-hidden { display: none !important; }
+            /* Hide UI elements when printing */
+            .edit-controls, .header-bar, #flash-effect, #toast, #upload-overlay, #success-overlay, .print-hidden { display: none !important; }
         }
     </style>
 </head>
@@ -111,29 +111,60 @@
     </div>
 
     <!-- Upload Progress Overlay -->
-    <div id="upload-overlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] hidden flex-col items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm flex flex-col items-center space-y-4">
-            <div class="relative w-12 h-12">
-                <div class="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
-                <div class="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
+    <div id="upload-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] hidden flex-col items-center justify-center p-4 transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm flex flex-col items-center space-y-6">
+            <div class="relative w-16 h-16">
+                <div class="absolute inset-0 border-[6px] border-gray-100 rounded-full"></div>
+                <div class="absolute inset-0 border-[6px] border-blue-600 rounded-full border-t-transparent animate-spin"></div>
             </div>
             
-            <div class="w-full space-y-2">
-                <div class="flex justify-between text-xs font-bold text-gray-600 uppercase tracking-wide">
+            <div class="w-full space-y-3 text-center">
+                <h3 class="text-lg font-bold text-gray-800">Đang lưu ảnh...</h3>
+                <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden shadow-inner">
+                    <div id="upload-bar" class="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                </div>
+                <div class="flex justify-between text-xs font-semibold text-gray-500">
                     <span id="upload-status-text">Đang xử lý...</span>
                     <span id="upload-percent">0%</span>
                 </div>
-                <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div id="upload-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
-                </div>
             </div>
 
-            <p class="text-xs text-center text-gray-400">Vui lòng không tắt trình duyệt</p>
-
-            <button onclick="cancelUpload()" class="text-red-500 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-bold w-full transition-colors">
+            <button onclick="cancelUpload()" class="text-red-500 hover:bg-red-50 px-6 py-2 rounded-full text-sm font-bold transition-colors">
                 Hủy bỏ
             </button>
         </div>
+    </div>
+
+    <!-- Success / Printing Overlay -->
+    <div id="success-overlay" class="fixed inset-0 bg-white/95 z-[80] hidden flex-col items-center justify-center space-y-6 p-4">
+        <div class="text-center space-y-2 animate-bounce-slow">
+            <div class="inline-flex items-center justify-center w-20 h-20 bg-blue-50 rounded-full mb-2">
+                <i data-lucide="printer" class="w-10 h-10 text-blue-600"></i>
+            </div>
+            <h3 class="text-3xl font-bold text-gray-900">Đang in ảnh...</h3>
+            <p class="text-gray-500 text-lg">Vui lòng chờ nhận ảnh tại máy in</p>
+        </div>
+        
+        <!-- Result Preview with QR for scanning -->
+        <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-xl max-w-sm w-full flex flex-col items-center text-center space-y-4">
+            <div>
+                <span class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-wider">File mềm & Video</span>
+            </div>
+            
+            <div class="relative group">
+                <img id="result-qr-display" src="" class="w-40 h-40 object-contain p-2 border-2 border-dashed border-gray-300 rounded-xl" alt="QR Code">
+                <div class="absolute -bottom-2 -right-2 bg-black text-white text-[10px] px-2 py-1 rounded font-bold">SCAN ME</div>
+            </div>
+            
+            <p class="text-sm text-gray-600 leading-relaxed px-4">
+                Quét mã trên để tải<br><b>Ảnh gốc</b> & <b>Video Timelapse</b>
+            </p>
+        </div>
+
+        <button onclick="resetApp()" class="px-10 py-4 bg-gray-900 text-white font-bold rounded-2xl hover:bg-black transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 flex items-center gap-3">
+            <span>Chụp khách tiếp theo</span>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
+        </button>
     </div>
 
     <!-- HEADER -->
@@ -335,9 +366,9 @@
         const CONFIG = {
             api: "https://script.google.com/macros/s/AKfycby-YO32fDyCLEY9kBhAwspDTE5A6N0-8ezdWBeG4EhG7sRJjxoNati0JU6bz7x0eIdf/exec",
             timelapse: { maxDuration: 8, outputFps: 8, minInterval: 100, mimeType: 'video/webm' },
-            // Added explicit scale factor for High DPI rendering (Super sharp text)
+            // High DPI config (scale 2 = 2x quality)
             layout: { 
-                scale: 2, // 2x resolution
+                scale: 2, 
                 photoWidth: 600, 
                 photoHeight: 450, 
                 padding: 40, 
@@ -382,7 +413,9 @@
             uploadOverlay: document.getElementById('upload-overlay'),
             uploadStatusText: document.getElementById('upload-status-text'),
             uploadPercent: document.getElementById('upload-percent'),
-            uploadBar: document.getElementById('upload-bar')
+            uploadBar: document.getElementById('upload-bar'),
+            successOverlay: document.getElementById('success-overlay'),
+            resultQrDisplay: document.getElementById('result-qr-display')
         };
 
         // --- CORE FUNCTIONS ---
@@ -505,21 +538,21 @@
             els.uploadOverlay.classList.add('flex');
             state.uploadController = new AbortController();
             
-            // FAKE PROGRESS LOGIC
+            // FAKE PROGRESS LOGIC (Adjusted for feel)
             let currentProgress = 0;
             updateProgress(0, "Chuẩn bị...");
             
             const progressTimer = setInterval(() => {
                 if (currentProgress < 70) {
-                    // Fast phase: Random 1-3%
-                    currentProgress += Math.random() * 3 + 1; 
+                    // Fast phase: Random 1-2% every 300ms
+                    currentProgress += Math.random() * 2; 
                 } else if (currentProgress < 95) {
-                    // Slow phase
+                    // Slow phase: Very slow increment
                     currentProgress += Math.random() * 0.5;
                 }
                 if (currentProgress > 95) currentProgress = 95;
                 updateProgress(currentProgress, "Đang gửi dữ liệu...");
-            }, 50); // 50ms interval for smooth fast feeling
+            }, 300); 
 
             try {
                 // Step 1: Compress Images
@@ -534,14 +567,14 @@
                     video = { name: "timelapse.webm", base64: await blobToBase64(state.timelapse.blob) };
                 }
                 
-                // Step 3: Add Composite Result (Upload Version - Short Footer, No QR)
-                // We use renderComposite with isUploadMode=true
+                // Step 3: Add Composite Result (UPLOAD MODE: isUploadMode=true)
+                // This version has short footer and NO QR
                 renderComposite(true); 
                 images.push({
                     name: "final_result.jpg",
                     base64: els.mainCanvas.toDataURL('image/jpeg', 0.9).split(',')[1]
                 });
-                renderComposite(false); // Restore UI immediately for user
+                renderComposite(false); // Restore UI immediately for user viewing
 
                 const res = await fetch(CONFIG.api, {
                     method: "POST",
@@ -568,7 +601,12 @@
                     });
 
                     state.qrCodeImg = img;
-                    renderComposite(false); // Draw QR into canvas for printing
+                    
+                    // Set QR for success overlay
+                    els.resultQrDisplay.src = qrUrl;
+                    
+                    // Render for print (With QR)
+                    renderComposite(false); 
 
                     // Step 6: Print
                     setTimeout(() => {
@@ -600,6 +638,10 @@
             state.qrCodeImg = null;
             state.isUploaded = false;
             state.edit.flipHorizontal = false;
+            // Clear success overlay
+            els.successOverlay.classList.add('hidden');
+            els.successOverlay.classList.remove('flex');
+            
             switchScreen('capture');
             updateCounter();
         }
@@ -610,6 +652,10 @@
             state.qrCodeImg = null;
             state.stickers = [];
             state.isUploaded = false;
+            // Clear success overlay
+            els.successOverlay.classList.add('hidden');
+            els.successOverlay.classList.remove('flex');
+            
             switchScreen('setup');
             initCamera();
         }
@@ -673,10 +719,10 @@
         async function finishSession() {
             if(state.timelapse.timerId) clearInterval(state.timelapse.timerId);
             
-            // Stop Camera
+            // Stop Camera immediately after session to prevent lag
             if (state.camera.stream) {
                 state.camera.stream.getTracks().forEach(t => t.stop());
-                state.camera.stream = null; // Clear ref
+                state.camera.stream = null; 
             }
 
             switchScreen('edit');
@@ -698,7 +744,7 @@
             const { photoWidth, photoHeight, padding, gap, footer, scale } = CONFIG.layout;
             const layout = state.settings.layout;
             
-            // For upload mode: Reduce footer height (e.g. 80px just for title)
+            // For upload mode: Reduce footer height (e.g. 80px just for title, no QR space)
             const currentFooter = isUploadMode ? 80 : footer;
 
             // Basic Dimensions (Logical)
@@ -714,8 +760,8 @@
             canvas.height = logicalH * scale;
             
             // Reset and Scale Context
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-            ctx.scale(scale, scale); // Scale everything up
+            ctx.setTransform(1, 0, 0, 1, 0, 0); 
+            ctx.scale(scale, scale); 
 
             // Background
             ctx.fillStyle = state.edit.frameColor;
@@ -762,7 +808,7 @@
                 ctx.restore();
             });
 
-            // SKIP QR IF UPLOAD MODE
+            // SKIP QR & DATE IF UPLOAD MODE (Clean image for cloud)
             if (isUploadMode) return;
 
             // QR Code Area
@@ -862,9 +908,13 @@
 
         window.onload = initCamera;
         
-        // Auto Reset after Print
+        // Auto Show Success Overlay After Print Dialog Closes
         window.onafterprint = function() {
-            setTimeout(resetApp, 1000);
+            // Delay slightly to ensure browser is ready
+            setTimeout(() => {
+                els.successOverlay.classList.remove('hidden');
+                els.successOverlay.classList.add('flex');
+            }, 500);
         };
     </script>
     <style> .preset-btn { height: 40px; border-radius: 8px; font-size: 10px; font-weight: 600; transition: all 0.2s; } .preset-btn:hover { transform: scale(1.05); } </style>
