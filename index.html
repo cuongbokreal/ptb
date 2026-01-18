@@ -64,22 +64,39 @@
             width: 100%; height: 4px; background: #e5e7eb; border-radius: 2px;
         }
 
-        /* Print Styles */
+        /* Print Styles - Optimized for Photo Printing */
         @media print {
+            @page {
+                margin: 0;
+                size: auto; /* Let content dictate size */
+            }
+            body, html {
+                margin: 0; padding: 0;
+                width: 100%; height: 100%;
+                background: white;
+            }
             body * { visibility: hidden; }
             #step-edit, #step-edit * { visibility: visible; }
-            #step-edit { position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; padding: 0; background: white; }
-            #canvas-wrapper { 
-                position: absolute; left: 50%; top: 50%; 
-                transform: translate(-50%, -50%); 
-                width: 100% !important; height: 100% !important; 
-                box-shadow: none; border: none;
+            #step-edit { 
+                position: absolute; left: 0; top: 0; 
+                width: 100%; height: 100%; 
+                margin: 0; padding: 0; 
                 display: flex; align-items: center; justify-content: center;
+                background: white;
+            }
+            #canvas-wrapper { 
+                position: static !important; /* Reset positioning */
+                transform: none !important;
+                box-shadow: none !important; border: none !important;
+                margin: 0 !important; padding: 0 !important;
+                display: block;
             }
             #main-canvas { 
-                max-width: 100%; max-height: 100%; 
-                object-fit: contain;
+                /* Force canvas to print at exact pixels if possible, or fit to page */
+                max-width: 100%; max-height: 100vh;
                 width: auto !important; height: auto !important;
+                object-fit: contain;
+                visibility: visible !important;
             }
             /* Hide controls when printing */
             .edit-controls, .header-bar, #flash-effect, #toast, #upload-overlay, .print-hidden { display: none !important; }
@@ -107,7 +124,7 @@
                     <span id="upload-percent">0%</span>
                 </div>
                 <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div id="upload-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    <div id="upload-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
                 </div>
             </div>
 
@@ -199,6 +216,7 @@
                 <div id="countdown-display" class="absolute inset-0 flex items-center justify-center z-20 hidden">
                     <span class="text-[8rem] font-bold text-white drop-shadow-2xl animate-pulse">3</span>
                 </div>
+                <!-- Freeze preview: No mirror class, data is pre-mirrored -->
                 <canvas id="freeze-preview" class="absolute inset-0 w-full h-full object-cover hidden z-10"></canvas>
             </div>
             
@@ -317,7 +335,15 @@
         const CONFIG = {
             api: "https://script.google.com/macros/s/AKfycby-YO32fDyCLEY9kBhAwspDTE5A6N0-8ezdWBeG4EhG7sRJjxoNati0JU6bz7x0eIdf/exec",
             timelapse: { maxDuration: 8, outputFps: 8, minInterval: 100, mimeType: 'video/webm' },
-            layout: { photoWidth: 600, photoHeight: 450, padding: 40, gap: 20, footer: 160 }
+            // Added explicit scale factor for High DPI rendering (Super sharp text)
+            layout: { 
+                scale: 2, // 2x resolution
+                photoWidth: 600, 
+                photoHeight: 450, 
+                padding: 40, 
+                gap: 20, 
+                footer: 160 
+            }
         };
 
         lucide.createIcons();
@@ -453,7 +479,7 @@
 
         function updateProgress(percent, text) {
             els.uploadBar.style.width = `${percent}%`;
-            els.uploadPercent.innerText = `${percent}%`;
+            els.uploadPercent.innerText = `${Math.round(percent)}%`;
             els.uploadStatusText.innerText = text;
         }
 
@@ -479,41 +505,43 @@
             els.uploadOverlay.classList.add('flex');
             state.uploadController = new AbortController();
             
+            // FAKE PROGRESS LOGIC
+            let currentProgress = 0;
+            updateProgress(0, "Chuẩn bị...");
+            
+            const progressTimer = setInterval(() => {
+                if (currentProgress < 70) {
+                    // Fast phase: Random 1-3%
+                    currentProgress += Math.random() * 3 + 1; 
+                } else if (currentProgress < 95) {
+                    // Slow phase
+                    currentProgress += Math.random() * 0.5;
+                }
+                if (currentProgress > 95) currentProgress = 95;
+                updateProgress(currentProgress, "Đang gửi dữ liệu...");
+            }, 50); // 50ms interval for smooth fast feeling
+
             try {
                 // Step 1: Compress Images
-                updateProgress(10, "Đang nén ảnh...");
                 const images = state.captures.map((c, i) => ({
                     name: `capture_${i+1}.jpg`,
                     base64: c.toDataURL('image/jpeg', 0.8).split(',')[1]
                 }));
-                await wait(200);
 
                 // Step 2: Encode Video
                 let video = null;
                 if (state.timelapse.blob) {
-                    updateProgress(30, "Đang xử lý video...");
                     video = { name: "timelapse.webm", base64: await blobToBase64(state.timelapse.blob) };
                 }
                 
-                // Step 3: Add Composite Result (Upload Version - Short Footer)
-                updateProgress(50, "Đang tạo ảnh kết quả...");
-                renderComposite(true); // Render for upload (no QR, short footer)
+                // Step 3: Add Composite Result (Upload Version - Short Footer, No QR)
+                // We use renderComposite with isUploadMode=true
+                renderComposite(true); 
                 images.push({
                     name: "final_result.jpg",
                     base64: els.mainCanvas.toDataURL('image/jpeg', 0.9).split(',')[1]
                 });
-                renderComposite(false); // Restore UI (QR placeholder)
-
-                // Step 4: Uploading
-                updateProgress(60, "Đang gửi lên Cloud...");
-                
-                let simProgress = 60;
-                const progressInterval = setInterval(() => {
-                    if(simProgress < 90) {
-                        simProgress += 2;
-                        updateProgress(simProgress, "Đang gửi lên Cloud...");
-                    }
-                }, 200);
+                renderComposite(false); // Restore UI immediately for user
 
                 const res = await fetch(CONFIG.api, {
                     method: "POST",
@@ -522,7 +550,7 @@
                     signal: state.uploadController.signal
                 }).then(r => r.json());
 
-                clearInterval(progressInterval);
+                clearInterval(progressTimer);
 
                 if (res.status === "success") {
                     updateProgress(100, "Hoàn tất!");
@@ -553,6 +581,7 @@
                 }
 
             } catch (e) {
+                clearInterval(progressTimer);
                 if (e.name === 'AbortError') return;
                 console.error(e);
                 els.uploadOverlay.classList.add('hidden');
@@ -666,24 +695,31 @@
         function renderComposite(isUploadMode = false) {
             const canvas = els.mainCanvas;
             const ctx = canvas.getContext('2d');
-            const { photoWidth: pW, photoHeight: pH, padding, gap, footer } = CONFIG.layout;
+            const { photoWidth, photoHeight, padding, gap, footer, scale } = CONFIG.layout;
             const layout = state.settings.layout;
             
             // For upload mode: Reduce footer height (e.g. 80px just for title)
             const currentFooter = isUploadMode ? 80 : footer;
 
-            let cW, cH, rows, cols;
-            if(layout === 'single') { cols=1; rows=1; cW = pW + padding*2; cH = pH + padding*2 + currentFooter; }
-            else if(layout === 'strip') { cols=1; rows=3; cW = (pW/2) + padding*2; cH = (pH/2)*3 + gap*2 + padding*2 + currentFooter; }
-            else if(layout === 'grid') { cols=2; rows=2; cW = pW*2 + gap + padding*2; cH = pH*2 + gap + padding*2 + currentFooter; }
-            else if(layout === 'grid6') { cols=2; rows=3; cW = pW*2 + gap + padding*2; cH = pH*3 + gap*2 + padding*2 + currentFooter; }
-            else if(layout === 'grid8') { cols=2; rows=4; cW = pW*2 + gap + padding*2; cH = pH*4 + gap*3 + padding*2 + currentFooter; }
+            // Basic Dimensions (Logical)
+            let logicalW, logicalH, rows, cols;
+            if(layout === 'single') { cols=1; rows=1; logicalW = photoWidth + padding*2; logicalH = photoHeight + padding*2 + currentFooter; }
+            else if(layout === 'strip') { cols=1; rows=3; logicalW = (photoWidth/2) + padding*2; logicalH = (photoHeight/2)*3 + gap*2 + padding*2 + currentFooter; }
+            else if(layout === 'grid') { cols=2; rows=2; logicalW = photoWidth*2 + gap + padding*2; logicalH = photoHeight*2 + gap + padding*2 + currentFooter; }
+            else if(layout === 'grid6') { cols=2; rows=3; logicalW = photoWidth*2 + gap + padding*2; logicalH = photoHeight*3 + gap*2 + padding*2 + currentFooter; }
+            else if(layout === 'grid8') { cols=2; rows=4; logicalW = photoWidth*2 + gap + padding*2; logicalH = photoHeight*4 + gap*3 + padding*2 + currentFooter; }
 
-            canvas.width = cW; canvas.height = cH;
+            // High DPI Scaling
+            canvas.width = logicalW * scale;
+            canvas.height = logicalH * scale;
+            
+            // Reset and Scale Context
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            ctx.scale(scale, scale); // Scale everything up
 
             // Background
             ctx.fillStyle = state.edit.frameColor;
-            ctx.fillRect(0, 0, cW, cH);
+            ctx.fillRect(0, 0, logicalW, logicalH);
 
             // Photos
             const f = state.edit.filters;
@@ -692,9 +728,9 @@
             state.captures.forEach((img, i) => {
                 if (i >= cols*rows) return;
                 let x, y, w, h;
-                if (layout === 'strip') { w = pW/2; h = pH/2; x = padding; y = padding + i*(h+gap); }
-                else if (layout === 'single') { w = pW; h = pH; x = padding; y = padding; }
-                else { w = pW; h = pH; x = padding + (i % cols)*(w+gap); y = padding + Math.floor(i/cols)*(h+gap); }
+                if (layout === 'strip') { w = photoWidth/2; h = photoHeight/2; x = padding; y = padding + i*(h+gap); }
+                else if (layout === 'single') { w = photoWidth; h = photoHeight; x = padding; y = padding; }
+                else { w = photoWidth; h = photoHeight; x = padding + (i % cols)*(w+gap); y = padding + Math.floor(i/cols)*(h+gap); }
                 
                 ctx.save();
                 ctx.translate(x + w/2, y + h/2);
@@ -710,19 +746,18 @@
             const isDark = state.edit.frameColor === '#111827';
             ctx.fillStyle = isDark ? '#ffffff' : '#111827';
             
-            // Title (Higher up)
-            // If upload mode, title is centered in 80px footer (~40px y + offset)
-            const titleY = isUploadMode ? (cH - currentFooter + 50) : (cH - currentFooter + 50);
+            // Title
+            const titleY = isUploadMode ? (logicalH - currentFooter + 50) : (logicalH - currentFooter + 50);
             ctx.font = 'bold 40px Inter';
             ctx.textAlign = 'center';
-            ctx.fillText(state.edit.text || 'Photobooth', cW/2, titleY);
+            ctx.fillText(state.edit.text || 'Photobooth', logicalW/2, titleY);
 
             // Stickers
             state.stickers.forEach(s => {
                 ctx.save();
                 ctx.font = `${80 * s.scale}px sans-serif`;
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.translate(s.x * cW, s.y * cH);
+                ctx.translate(s.x * logicalW, s.y * logicalH);
                 ctx.fillText(s.text, 0, 0);
                 ctx.restore();
             });
@@ -730,10 +765,10 @@
             // SKIP QR IF UPLOAD MODE
             if (isUploadMode) return;
 
-            // QR Code Area - COMPACT & CORNER & BELOW TITLE
+            // QR Code Area
             const qrSize = 80; 
-            const qrX = cW - qrSize - 20;
-            const qrY = cH - qrSize - 30;
+            const qrX = logicalW - qrSize - 20;
+            const qrY = logicalH - qrSize - 30;
 
             // QR Background
             ctx.fillStyle = '#ffffff';
