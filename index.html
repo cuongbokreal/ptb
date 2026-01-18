@@ -383,7 +383,7 @@
         const state = {
             step: 'setup',
             camera: { id: null, stream: null },
-            timelapse: { timerId: null, frames: [], blob: null },
+            timelapse: { timerId: null, frames: [], blob: null, generating: false },
             settings: { layout: 'single', timer: 3 },
             captures: [], 
             isUploaded: false,
@@ -437,7 +437,10 @@
         }
 
         async function startStream() {
-            if (state.camera.stream) state.camera.stream.getTracks().forEach(t => t.stop());
+            if (state.camera.stream) {
+                state.camera.stream.getTracks().forEach(t => t.stop());
+                state.camera.stream = null;
+            }
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { deviceId: state.camera.id ? { exact: state.camera.id } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -458,6 +461,7 @@
         // --- TIMELAPSE ---
         function startTimelapseCapture(interval) {
             state.timelapse.frames = [];
+            state.timelapse.generating = false;
             const canvas = document.createElement('canvas');
             canvas.width = els.video.videoWidth;
             canvas.height = els.video.videoHeight;
@@ -472,7 +476,11 @@
         }
 
         async function generateTimelapseVideo() {
-            if (state.timelapse.frames.length === 0) return;
+            state.timelapse.generating = true;
+            if (state.timelapse.frames.length === 0) {
+                state.timelapse.generating = false;
+                return;
+            }
             const canvas = document.createElement('canvas');
             canvas.width = state.timelapse.frames[0].width;
             canvas.height = state.timelapse.frames[0].height;
@@ -488,6 +496,7 @@
                 recorder.onstop = () => {
                     state.timelapse.blob = new Blob(chunks, { type: CONFIG.timelapse.mimeType });
                     els.timelapseVideo.src = URL.createObjectURL(state.timelapse.blob);
+                    state.timelapse.generating = false;
                     resolve();
                 };
                 recorder.start();
@@ -552,18 +561,27 @@
                 }
                 if (currentProgress > 95) currentProgress = 95;
                 updateProgress(currentProgress, "Đang gửi dữ liệu...");
-            }, 150); 
+            }, 300); 
 
             try {
                 // Step 1: Compress Images
+                updateProgress(10, "Đang nén ảnh...");
                 const images = state.captures.map((c, i) => ({
                     name: `capture_${i+1}.jpg`,
                     base64: c.toDataURL('image/jpeg', 0.8).split(',')[1]
                 }));
+                await wait(200);
 
-                // Step 2: Encode Video
+                // Step 2: Encode Video (Wait if still generating)
+                updateProgress(20, "Kiểm tra video...");
+                if (state.timelapse.generating) {
+                    // Simple wait loop if still generating
+                    while(state.timelapse.generating) { await wait(200); }
+                }
+
                 let video = null;
                 if (state.timelapse.blob) {
+                    updateProgress(30, "Đang xử lý video...");
                     video = { name: "timelapse.webm", base64: await blobToBase64(state.timelapse.blob) };
                 }
                 
@@ -648,10 +666,18 @@
 
         function resetApp() {
             if(state.timelapse.timerId) clearInterval(state.timelapse.timerId);
-            if (state.camera.stream) state.camera.stream.getTracks().forEach(t => t.stop());
+            // Explicitly stop camera tracks and clear ref
+            if (state.camera.stream) {
+                state.camera.stream.getTracks().forEach(t => t.stop());
+                state.camera.stream = null;
+            }
+            els.video.srcObject = null; // Clear video element source
+
             state.qrCodeImg = null;
             state.stickers = [];
             state.isUploaded = false;
+            state.timelapse.blob = null;
+            
             // Clear success overlay
             els.successOverlay.classList.add('hidden');
             els.successOverlay.classList.remove('flex');
@@ -724,6 +750,7 @@
                 state.camera.stream.getTracks().forEach(t => t.stop());
                 state.camera.stream = null; 
             }
+            els.video.srcObject = null;
 
             switchScreen('edit');
             
