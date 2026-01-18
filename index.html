@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Photobooth Ultimate</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Pacifico&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        script: ['Pacifico', 'cursive'],
+                    },
+                    colors: {
+                        brand: {
+                            bg: '#ffffff',
+                            surface: '#f3f4f6',
+                            text: '#111827',
+                            border: '#e5e7eb',
+                        }
+                    },
+                    animation: {
+                        'flash-soft': 'flashSoft 0.3s ease-out forwards',
+                    },
+                    keyframes: {
+                        flashSoft: {
+                            '0%': { opacity: 0 },
+                            '50%': { opacity: 0.8, backgroundColor: 'white' },
+                            '100%': { opacity: 0 },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #ffffff; color: #111827; }
+        
+        /* Mirror utility for webcam */
+        .camera-mirror { transform: scaleX(-1); }
+        
+        #canvas-container {
+            background-image: repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%) !important;
+            background-size: 20px 20px !important;
+        }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%;
+            background: #111827; margin-top: -6px; cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; background: #e5e7eb; border-radius: 2px;
+        }
+
+        /* Print Styles */
+        @media print {
+            body * { visibility: hidden; }
+            #step-edit, #step-edit * { visibility: visible; }
+            #step-edit { position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; padding: 0; background: white; }
+            #canvas-wrapper { 
+                position: absolute; left: 50%; top: 50%; 
+                transform: translate(-50%, -50%); 
+                width: 100% !important; height: 100% !important; 
+                box-shadow: none; border: none;
+                display: flex; align-items: center; justify-content: center;
+            }
+            #main-canvas { 
+                max-width: 100%; max-height: 100%; 
+                object-fit: contain;
+                width: auto !important; height: auto !important;
+            }
+            /* Hide controls when printing */
+            .edit-controls, .header-bar, #flash-effect, #toast, #upload-overlay, .print-hidden { display: none !important; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans overflow-hidden">
+
+    <div id="flash-effect" class="fixed inset-0 pointer-events-none opacity-0 z-50 bg-white"></div>
+    <div id="toast" class="fixed top-5 right-5 bg-red-600 text-white px-4 py-3 rounded-lg shadow-xl transform translate-x-full transition-transform duration-300 z-[60] font-medium text-sm flex items-center gap-2">
+        <i data-lucide="alert-circle" class="w-4 h-4"></i><span>Error</span>
+    </div>
+
+    <!-- Upload Progress Overlay -->
+    <div id="upload-overlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] hidden flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm flex flex-col items-center space-y-4">
+            <div class="relative w-12 h-12">
+                <div class="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
+                <div class="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
+            </div>
+            
+            <div class="w-full space-y-2">
+                <div class="flex justify-between text-xs font-bold text-gray-600 uppercase tracking-wide">
+                    <span id="upload-status-text">Đang xử lý...</span>
+                    <span id="upload-percent">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div id="upload-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <p class="text-xs text-center text-gray-400">Vui lòng không tắt trình duyệt</p>
+
+            <button onclick="cancelUpload()" class="text-red-500 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-bold w-full transition-colors">
+                Hủy bỏ
+            </button>
+        </div>
+    </div>
+
+    <!-- HEADER -->
+    <header class="h-14 border-b border-brand-border bg-white/90 backdrop-blur flex items-center justify-between px-4 md:px-6 z-40 flex-shrink-0 header-bar">
+        <div class="flex items-center gap-3">
+            <button id="btn-back" onclick="goBack()" class="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600 hidden">
+                <i data-lucide="chevron-left" class="w-6 h-6"></i>
+            </button>
+            <div class="flex items-center gap-2" onclick="resetApp()" style="cursor: pointer">
+                <div class="w-6 h-6 bg-gray-900 rounded-md flex items-center justify-center">
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight text-gray-900 hidden sm:block">Photobooth</h1>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="step-indicator" class="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">SETUP</span>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 relative overflow-hidden flex flex-col">
+
+        <!-- 1. SETUP SCREEN -->
+        <section id="step-setup" class="flex-1 flex flex-col items-center justify-center p-4 overflow-y-auto">
+            <div class="w-full max-w-lg space-y-6 my-auto">
+                <div class="text-center space-y-2">
+                    <h2 class="text-3xl font-bold text-gray-900 font-script">Let's take a photo!</h2>
+                    <p class="text-gray-500 text-sm">Chọn bố cục và bắt đầu</p>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6">
+                    <div class="space-y-3">
+                        <label class="text-xs font-bold text-gray-400 uppercase tracking-wider">Layout</label>
+                        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                            <button onclick="selectLayout('single')" class="layout-btn ring-2 ring-gray-900 bg-gray-50 p-2 rounded-lg hover:bg-gray-100 transition-all" data-type="single">
+                                <div class="flex flex-col items-center gap-1"><div class="w-5 h-5 border border-gray-400 bg-gray-300 rounded-sm"></div><span class="text-[10px]">Đơn (1)</span></div>
+                            </button>
+                            <button onclick="selectLayout('strip')" class="layout-btn border border-gray-200 p-2 rounded-lg hover:bg-gray-50 transition-all" data-type="strip">
+                                <div class="flex flex-col items-center gap-1"><div class="w-3 h-5 border border-gray-400 flex flex-col gap-[1px] p-[1px]"><div class="bg-gray-300 flex-1"></div><div class="bg-gray-300 flex-1"></div><div class="bg-gray-300 flex-1"></div></div><span class="text-[10px]">Strip (3)</span></div>
+                            </button>
+                            <button onclick="selectLayout('grid')" class="layout-btn border border-gray-200 p-2 rounded-lg hover:bg-gray-50 transition-all" data-type="grid">
+                                <div class="flex flex-col items-center gap-1"><div class="w-5 h-5 border border-gray-400 grid grid-cols-2 gap-[1px] p-[1px]"><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div></div><span class="text-[10px]">Grid (4)</span></div>
+                            </button>
+                            <button onclick="selectLayout('grid6')" class="layout-btn border border-gray-200 p-2 rounded-lg hover:bg-gray-50 transition-all" data-type="grid6">
+                                <div class="flex flex-col items-center gap-1"><div class="w-4 h-5 border border-gray-400 grid grid-cols-2 grid-rows-3 gap-[1px] p-[1px]"><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div></div><span class="text-[10px]">Grid (6)</span></div>
+                            </button>
+                            <button onclick="selectLayout('grid8')" class="layout-btn border border-gray-200 p-2 rounded-lg hover:bg-gray-50 transition-all" data-type="grid8">
+                                <div class="flex flex-col items-center gap-1"><div class="w-4 h-5 border border-gray-400 grid grid-cols-2 grid-rows-4 gap-[1px] p-[1px]"><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div><div class="bg-gray-300"></div></div><span class="text-[10px]">Grid (8)</span></div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1">
+                            <label class="text-xs font-bold text-gray-400 uppercase">Camera</label>
+                            <select id="camera-select" class="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:ring-0 outline-none"><option>Đang tải...</option></select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-bold text-gray-400 uppercase">Hẹn giờ</label>
+                            <select id="timer-select" class="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:ring-0 outline-none">
+                                <option value="3">3 giây</option>
+                                <option value="5">5 giây</option>
+                                <option value="10">10 giây</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button onclick="startPhotobooth()" class="w-full bg-gray-900 hover:bg-black text-white font-bold py-3.5 rounded-xl shadow-lg transition-transform active:scale-[0.98] flex items-center justify-center gap-2">
+                        <span>Bắt đầu chụp</span> <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. CAPTURE SCREEN -->
+        <section id="step-capture" class="hidden flex-1 flex flex-col md:flex-row relative bg-gray-100">
+            <div class="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
+                <video id="webcam" autoplay playsinline muted class="h-full w-auto max-w-none object-cover camera-mirror"></video>
+                <div id="countdown-display" class="absolute inset-0 flex items-center justify-center z-20 hidden">
+                    <span class="text-[8rem] font-bold text-white drop-shadow-2xl animate-pulse">3</span>
+                </div>
+                <canvas id="freeze-preview" class="absolute inset-0 w-full h-full object-cover hidden z-10"></canvas>
+            </div>
+            
+            <div class="h-24 md:h-full md:w-32 bg-white flex md:flex-col items-center justify-between px-6 md:py-8 z-30 border-t md:border-l border-gray-200 flex-shrink-0">
+                <span id="capture-counter" class="text-gray-900 text-lg font-bold">0 / 1</span>
+                <button id="trigger-btn" onclick="startCaptureSequence()" class="w-16 h-16 rounded-full border-[6px] border-gray-100 bg-red-500 hover:bg-red-600 shadow-xl transition-transform active:scale-90 flex items-center justify-center">
+                    <i data-lucide="camera" class="w-8 h-8 text-white"></i>
+                </button>
+                <div class="w-8"></div>
+            </div>
+        </section>
+
+        <!-- 3. EDIT SCREEN -->
+        <section id="step-edit" class="hidden flex-1 h-full flex flex-col md:flex-row bg-gray-100">
+            <div class="flex-1 flex items-center justify-center p-4 overflow-hidden relative" id="canvas-wrapper">
+                <div class="relative shadow-2xl rounded-sm overflow-hidden bg-white max-h-full max-w-full">
+                    <canvas id="main-canvas" class="object-contain max-h-[80vh] w-auto h-auto cursor-crosshair" onmousedown="startDrag(event)" onmousemove="drag(event)" onmouseup="endDrag()" ontouchstart="startDrag(event)" ontouchmove="drag(event)" ontouchend="endDrag()"></canvas>
+                </div>
+                <p class="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-gray-400 bg-white/80 px-2 py-1 rounded backdrop-blur print-hidden">Kéo để di chuyển Sticker</p>
+            </div>
+
+            <div class="w-full md:w-80 bg-white border-t md:border-l border-gray-200 flex flex-col z-20 h-[45vh] md:h-auto edit-controls">
+                <div class="flex border-b border-gray-100">
+                    <button onclick="switchTab('adjust')" class="tab-btn active flex-1 py-3 text-[10px] font-bold text-gray-400 hover:text-gray-900 uppercase" data-tab="adjust">Màu sắc</button>
+                    <button onclick="switchTab('decor')" class="tab-btn flex-1 py-3 text-[10px] font-bold text-gray-400 hover:text-gray-900 uppercase" data-tab="decor">Khung</button>
+                    <button onclick="switchTab('stickers')" class="tab-btn flex-1 py-3 text-[10px] font-bold text-gray-400 hover:text-gray-900 uppercase" data-tab="stickers">Sticker</button>
+                    <button onclick="switchTab('video')" class="tab-btn flex-1 py-3 text-[10px] font-bold text-gray-400 hover:text-gray-900 uppercase" data-tab="video">Video</button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-5 space-y-6 relative">
+                    <!-- Adjust Tab -->
+                    <div id="tab-adjust" class="tab-content space-y-4">
+                        <div class="grid grid-cols-3 gap-2">
+                            <button onclick="applyPreset('normal')" class="preset-btn bg-gray-100">Gốc</button>
+                            <button onclick="applyPreset('bw')" class="preset-btn bg-gray-800 text-white">B&W</button>
+                            <button onclick="applyPreset('warm')" class="preset-btn bg-orange-100 text-orange-800">Ấm</button>
+                            <button onclick="applyPreset('vintage')" class="preset-btn bg-amber-100 text-amber-800">Xưa</button>
+                            <button onclick="applyPreset('cool')" class="preset-btn bg-blue-100 text-blue-800">Lạnh</button>
+                            <button onclick="toggleFlip()" class="preset-btn bg-gray-200 text-gray-900 flex items-center justify-center gap-1"><i data-lucide="flip-horizontal" class="w-3 h-3"></i> Lật</button>
+                        </div>
+                        <div class="space-y-3 pt-2">
+                            <div><span class="text-xs text-gray-500">Độ sáng</span><input type="range" min="50" max="150" value="100" oninput="updateFilter('brightness', this.value)"></div>
+                            <div><span class="text-xs text-gray-500">Tương phản</span><input type="range" min="50" max="150" value="100" oninput="updateFilter('contrast', this.value)"></div>
+                        </div>
+                    </div>
+
+                    <!-- Decor Tab -->
+                    <div id="tab-decor" class="tab-content hidden space-y-4">
+                        <div>
+                            <span class="text-xs text-gray-400 block mb-2">Màu khung</span>
+                            <div class="flex gap-2 flex-wrap">
+                                <button onclick="setFrameColor('#ffffff')" class="w-8 h-8 rounded-full bg-white border shadow-sm ring-1 ring-gray-200"></button>
+                                <button onclick="setFrameColor('#111827')" class="w-8 h-8 rounded-full bg-gray-900 border shadow-sm"></button>
+                                <button onclick="setFrameColor('#f3f4f6')" class="w-8 h-8 rounded-full bg-gray-100 border shadow-sm"></button>
+                                <button onclick="setFrameColor('#fecaca')" class="w-8 h-8 rounded-full bg-red-200 border shadow-sm"></button>
+                                <button onclick="setFrameColor('#bfdbfe')" class="w-8 h-8 rounded-full bg-blue-200 border shadow-sm"></button>
+                                <button onclick="setFrameColor('#bbf7d0')" class="w-8 h-8 rounded-full bg-green-200 border shadow-sm"></button>
+                                <button onclick="setFrameColor('#fef08a')" class="w-8 h-8 rounded-full bg-yellow-200 border shadow-sm"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-400 block mb-2">Tiêu đề</span>
+                            <input type="text" id="custom-text" placeholder="Nhập tên sự kiện..." class="w-full bg-gray-50 border rounded-lg p-2 text-sm focus:bg-white outline-none" oninput="updateText(this.value)">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="show-date" checked onchange="toggleDate()" class="w-4 h-4 rounded">
+                            <label for="show-date" class="text-xs text-gray-600">Hiển thị ngày giờ</label>
+                        </div>
+                    </div>
+
+                    <!-- Stickers Tab -->
+                    <div id="tab-stickers" class="tab-content hidden space-y-4">
+                        <span class="text-xs text-gray-400 block mb-2">Chạm để thêm</span>
+                        <div class="grid grid-cols-4 gap-2">
+                            <button onclick="addSticker('❤️')" class="text-2xl p-2 hover:bg-gray-100 rounded">❤️</button>
+                            <button onclick="addSticker('✨')" class="text-2xl p-2 hover:bg-gray-100 rounded">✨</button>
+                            <button onclick="addSticker('🎉')" class="text-2xl p-2 hover:bg-gray-100 rounded">🎉</button>
+                            <button onclick="addSticker('🌸')" class="text-2xl p-2 hover:bg-gray-100 rounded">🌸</button>
+                            <button onclick="addSticker('😎')" class="text-2xl p-2 hover:bg-gray-100 rounded">😎</button>
+                            <button onclick="addSticker('🔥')" class="text-2xl p-2 hover:bg-gray-100 rounded">🔥</button>
+                            <button onclick="addSticker('👑')" class="text-2xl p-2 hover:bg-gray-100 rounded">👑</button>
+                            <button onclick="addSticker('🐱')" class="text-2xl p-2 hover:bg-gray-100 rounded">🐱</button>
+                        </div>
+                        <button onclick="clearStickers()" class="w-full py-2 border border-red-200 text-red-500 text-xs rounded hover:bg-red-50">Xóa hết Sticker</button>
+                    </div>
+
+                    <!-- Video Tab -->
+                    <div id="tab-video" class="tab-content hidden space-y-4">
+                        <div id="video-loading" class="flex flex-col items-center justify-center py-8 text-gray-400">
+                            <div class="loader mb-2"></div><p class="text-xs">Đang xử lý...</p>
+                        </div>
+                        <div id="video-container" class="hidden space-y-3">
+                            <div class="bg-black rounded-lg overflow-hidden aspect-video border border-gray-200">
+                                <video id="timelapse-video-edit" playsinline loop controls class="w-full h-full object-contain"></video>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-5 border-t border-gray-100 bg-white space-y-2">
+                    <button onclick="handlePrint()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg">
+                        <i data-lucide="printer" class="w-5 h-5"></i> In ảnh & Lưu
+                    </button>
+                    
+                    <button onclick="resetApp()" class="w-full py-2 text-xs font-semibold text-gray-500 hover:text-gray-900">
+                        Chụp lượt mới
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // CONFIG
+        const CONFIG = {
+            api: "https://script.google.com/macros/s/AKfycby-YO32fDyCLEY9kBhAwspDTE5A6N0-8ezdWBeG4EhG7sRJjxoNati0JU6bz7x0eIdf/exec",
+            timelapse: { maxDuration: 8, outputFps: 8, minInterval: 100, mimeType: 'video/webm' },
+            layout: { photoWidth: 600, photoHeight: 450, padding: 40, gap: 20, footer: 160 }
+        };
+
+        lucide.createIcons();
+
+        // STATE
+        const state = {
+            step: 'setup',
+            camera: { id: null, stream: null },
+            timelapse: { timerId: null, frames: [], blob: null },
+            settings: { layout: 'single', timer: 3 },
+            captures: [], 
+            isUploaded: false,
+            uploadController: null,
+            qrCodeImg: null,
+            stickers: [], 
+            drag: { active: false, idx: -1, startX: 0, startY: 0 },
+            edit: {
+                filters: { brightness: 100, contrast: 100, saturate: 100, sepia: 0, grayscale: 0 },
+                frameColor: '#ffffff',
+                text: '',
+                showDate: true,
+                flipHorizontal: false 
+            }
+        };
+
+        const els = {
+            screens: { setup: document.getElementById('step-setup'), capture: document.getElementById('step-capture'), edit: document.getElementById('step-edit') },
+            video: document.getElementById('webcam'),
+            mainCanvas: document.getElementById('main-canvas'),
+            freezeCanvas: document.getElementById('freeze-preview'),
+            timelapseVideo: document.getElementById('timelapse-video-edit'),
+            videoLoading: document.getElementById('video-loading'),
+            videoContainer: document.getElementById('video-container'),
+            stepIndicator: document.getElementById('step-indicator'),
+            btnBack: document.getElementById('btn-back'),
+            uploadOverlay: document.getElementById('upload-overlay'),
+            uploadStatusText: document.getElementById('upload-status-text'),
+            uploadPercent: document.getElementById('upload-percent'),
+            uploadBar: document.getElementById('upload-bar')
+        };
+
+        // --- CORE FUNCTIONS ---
+
+        async function initCamera() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                const select = document.getElementById('camera-select');
+                select.innerHTML = '';
+                videoDevices.forEach((d, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId;
+                    opt.text = d.label || `Camera ${i + 1}`;
+                    select.appendChild(opt);
+                });
+                if (videoDevices.length > 0 && !state.camera.id) state.camera.id = videoDevices[0].deviceId;
+            } catch (e) { showToast("Lỗi camera", true); }
+        }
+
+        async function startStream() {
+            if (state.camera.stream) state.camera.stream.getTracks().forEach(t => t.stop());
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: state.camera.id ? { exact: state.camera.id } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                state.camera.stream = stream;
+                els.video.srcObject = stream;
+                await new Promise(r => els.video.onloadedmetadata = r);
+                els.video.play();
+            } catch (e) { showToast("Không mở được camera", true); }
+        }
+
+        function updateCounter() {
+            const el = document.getElementById('capture-counter');
+            if(el) el.innerText = `${state.captures.length} / ${getRequiredPhotos()}`;
+        }
+
+        // --- TIMELAPSE ---
+        function startTimelapseCapture(interval) {
+            state.timelapse.frames = [];
+            const canvas = document.createElement('canvas');
+            canvas.width = els.video.videoWidth;
+            canvas.height = els.video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            
+            state.timelapse.timerId = setInterval(() => {
+                if (state.camera.stream && state.camera.stream.active) {
+                    ctx.drawImage(els.video, 0, 0);
+                    createImageBitmap(canvas).then(bmp => state.timelapse.frames.push(bmp));
+                }
+            }, interval);
+        }
+
+        async function generateTimelapseVideo() {
+            if (state.timelapse.frames.length === 0) return;
+            const canvas = document.createElement('canvas');
+            canvas.width = state.timelapse.frames[0].width;
+            canvas.height = state.timelapse.frames[0].height;
+            const ctx = canvas.getContext('2d');
+            ctx.translate(canvas.width, 0); ctx.scale(-1, 1); 
+            
+            const stream = canvas.captureStream(CONFIG.timelapse.outputFps);
+            const recorder = new MediaRecorder(stream, { mimeType: CONFIG.timelapse.mimeType });
+            const chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            
+            return new Promise(resolve => {
+                recorder.onstop = () => {
+                    state.timelapse.blob = new Blob(chunks, { type: CONFIG.timelapse.mimeType });
+                    els.timelapseVideo.src = URL.createObjectURL(state.timelapse.blob);
+                    resolve();
+                };
+                recorder.start();
+                let i = 0;
+                function draw() {
+                    if (i >= state.timelapse.frames.length) { recorder.stop(); return; }
+                    ctx.drawImage(state.timelapse.frames[i++], 0, 0);
+                    setTimeout(draw, 1000/CONFIG.timelapse.outputFps);
+                }
+                draw();
+            });
+        }
+
+        // --- UPLOAD, PROGRESS & PRINT ---
+        function blobToBase64(blob) {
+            return new Promise((resolve) => {
+                const r = new FileReader();
+                r.onloadend = () => resolve(r.result.split(',')[1]);
+                r.readAsDataURL(blob);
+            });
+        }
+
+        function updateProgress(percent, text) {
+            els.uploadBar.style.width = `${percent}%`;
+            els.uploadPercent.innerText = `${percent}%`;
+            els.uploadStatusText.innerText = text;
+        }
+
+        function cancelUpload() {
+            if (state.uploadController) {
+                state.uploadController.abort();
+                state.uploadController = null;
+                els.uploadOverlay.classList.add('hidden');
+                els.uploadOverlay.classList.remove('flex');
+                showToast("Đã hủy tải lên", true);
+            }
+        }
+
+        async function handlePrint() {
+            // Case 1: Already uploaded, just print
+            if (state.isUploaded) {
+                window.print();
+                return;
+            }
+
+            // Case 2: Start new upload
+            els.uploadOverlay.classList.remove('hidden');
+            els.uploadOverlay.classList.add('flex');
+            state.uploadController = new AbortController();
+            
+            try {
+                // Step 1: Compress Images
+                updateProgress(10, "Đang nén ảnh...");
+                const images = state.captures.map((c, i) => ({
+                    name: `capture_${i+1}.jpg`,
+                    base64: c.toDataURL('image/jpeg', 0.8).split(',')[1]
+                }));
+                await wait(200);
+
+                // Step 2: Encode Video
+                let video = null;
+                if (state.timelapse.blob) {
+                    updateProgress(30, "Đang xử lý video...");
+                    video = { name: "timelapse.webm", base64: await blobToBase64(state.timelapse.blob) };
+                }
+                
+                // Step 3: Add Composite Result (Upload Version - Short Footer)
+                updateProgress(50, "Đang tạo ảnh kết quả...");
+                renderComposite(true); // Render for upload (no QR, short footer)
+                images.push({
+                    name: "final_result.jpg",
+                    base64: els.mainCanvas.toDataURL('image/jpeg', 0.9).split(',')[1]
+                });
+                renderComposite(false); // Restore UI (QR placeholder)
+
+                // Step 4: Uploading
+                updateProgress(60, "Đang gửi lên Cloud...");
+                
+                let simProgress = 60;
+                const progressInterval = setInterval(() => {
+                    if(simProgress < 90) {
+                        simProgress += 2;
+                        updateProgress(simProgress, "Đang gửi lên Cloud...");
+                    }
+                }, 200);
+
+                const res = await fetch(CONFIG.api, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ images, video }),
+                    signal: state.uploadController.signal
+                }).then(r => r.json());
+
+                clearInterval(progressInterval);
+
+                if (res.status === "success") {
+                    updateProgress(100, "Hoàn tất!");
+                    state.isUploaded = true;
+
+                    // Step 5: Get QR
+                    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(res.folderUrl)}`;
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    
+                    await new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = reject;
+                        img.src = qrUrl;
+                    });
+
+                    state.qrCodeImg = img;
+                    renderComposite(false); // Draw QR into canvas for printing
+
+                    // Step 6: Print
+                    setTimeout(() => {
+                        els.uploadOverlay.classList.add('hidden');
+                        els.uploadOverlay.classList.remove('flex');
+                        window.print();
+                    }, 500);
+                } else {
+                    throw new Error(res.message);
+                }
+
+            } catch (e) {
+                if (e.name === 'AbortError') return;
+                console.error(e);
+                els.uploadOverlay.classList.add('hidden');
+                els.uploadOverlay.classList.remove('flex');
+                showToast("Lỗi kết nối. Vui lòng thử lại!", true);
+            }
+        }
+
+        // --- MAIN FLOW ---
+
+        async function startPhotobooth() {
+            state.settings.timer = parseInt(document.getElementById('timer-select').value);
+            await startStream();
+            state.captures = [];
+            state.stickers = [];
+            state.qrCodeImg = null;
+            state.isUploaded = false;
+            state.edit.flipHorizontal = false;
+            switchScreen('capture');
+            updateCounter();
+        }
+
+        function resetApp() {
+            if(state.timelapse.timerId) clearInterval(state.timelapse.timerId);
+            if (state.camera.stream) state.camera.stream.getTracks().forEach(t => t.stop());
+            state.qrCodeImg = null;
+            state.stickers = [];
+            state.isUploaded = false;
+            switchScreen('setup');
+            initCamera();
+        }
+
+        async function startCaptureSequence() {
+            document.getElementById('trigger-btn').style.display = 'none';
+            const total = getRequiredPhotos();
+            
+            const timePerShot = state.settings.timer + 1.5;
+            const totalTime = total * timePerShot;
+            let interval = (totalTime * 1000) / (CONFIG.timelapse.maxDuration * CONFIG.timelapse.outputFps);
+            if (interval < CONFIG.timelapse.minInterval) interval = CONFIG.timelapse.minInterval;
+            
+            startTimelapseCapture(interval);
+
+            const captureOne = async () => {
+                els.freezeCanvas.classList.add('hidden');
+                document.getElementById('countdown-display').classList.remove('hidden');
+                for(let i=state.settings.timer; i>0; i--) {
+                    document.getElementById('countdown-display').querySelector('span').innerText = i;
+                    await wait(1000);
+                }
+                document.getElementById('countdown-display').classList.add('hidden');
+
+                const vid = els.video;
+                const canvas = document.createElement('canvas');
+                const targetRatio = 4/3;
+                const vidRatio = vid.videoWidth / vid.videoHeight;
+                let sw, sh, sx, sy;
+                if (vidRatio > targetRatio) {
+                    sh = vid.videoHeight; sw = sh * targetRatio; sy = 0; sx = (vid.videoWidth - sw) / 2;
+                } else {
+                    sw = vid.videoWidth; sh = sw / targetRatio; sx = 0; sy = (vid.videoHeight - sh) / 2;
+                }
+
+                canvas.width = 800; canvas.height = 600; 
+                const ctx = canvas.getContext('2d');
+                ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
+                ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                
+                state.captures.push(canvas);
+
+                const flash = document.getElementById('flash-effect');
+                flash.classList.remove('opacity-0'); flash.classList.add('animate-flash-soft');
+                setTimeout(() => { flash.classList.remove('animate-flash-soft'); flash.classList.add('opacity-0'); }, 300);
+                
+                const fCtx = els.freezeCanvas.getContext('2d');
+                els.freezeCanvas.width = canvas.width; els.freezeCanvas.height = canvas.height;
+                // Draw freeze directly (already mirrored data)
+                fCtx.drawImage(canvas, 0, 0); 
+                els.freezeCanvas.classList.remove('hidden');
+
+                await wait(800);
+                updateCounter();
+
+                if(state.captures.length < total) await captureOne(); else finishSession();
+            };
+            await captureOne();
+        }
+
+        async function finishSession() {
+            if(state.timelapse.timerId) clearInterval(state.timelapse.timerId);
+            
+            // Stop Camera
+            if (state.camera.stream) {
+                state.camera.stream.getTracks().forEach(t => t.stop());
+                state.camera.stream = null; // Clear ref
+            }
+
+            switchScreen('edit');
+            
+            setTimeout(() => {
+                generateTimelapseVideo().then(() => {
+                    els.videoLoading.classList.add('hidden');
+                    els.videoContainer.classList.remove('hidden');
+                });
+            }, 500);
+            
+            renderComposite(false);
+        }
+
+        // --- RENDER LOGIC ---
+        function renderComposite(isUploadMode = false) {
+            const canvas = els.mainCanvas;
+            const ctx = canvas.getContext('2d');
+            const { photoWidth: pW, photoHeight: pH, padding, gap, footer } = CONFIG.layout;
+            const layout = state.settings.layout;
+            
+            // For upload mode: Reduce footer height (e.g. 80px just for title)
+            const currentFooter = isUploadMode ? 80 : footer;
+
+            let cW, cH, rows, cols;
+            if(layout === 'single') { cols=1; rows=1; cW = pW + padding*2; cH = pH + padding*2 + currentFooter; }
+            else if(layout === 'strip') { cols=1; rows=3; cW = (pW/2) + padding*2; cH = (pH/2)*3 + gap*2 + padding*2 + currentFooter; }
+            else if(layout === 'grid') { cols=2; rows=2; cW = pW*2 + gap + padding*2; cH = pH*2 + gap + padding*2 + currentFooter; }
+            else if(layout === 'grid6') { cols=2; rows=3; cW = pW*2 + gap + padding*2; cH = pH*3 + gap*2 + padding*2 + currentFooter; }
+            else if(layout === 'grid8') { cols=2; rows=4; cW = pW*2 + gap + padding*2; cH = pH*4 + gap*3 + padding*2 + currentFooter; }
+
+            canvas.width = cW; canvas.height = cH;
+
+            // Background
+            ctx.fillStyle = state.edit.frameColor;
+            ctx.fillRect(0, 0, cW, cH);
+
+            // Photos
+            const f = state.edit.filters;
+            ctx.filter = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%) sepia(${f.sepia}%) grayscale(${f.grayscale}%)`;
+
+            state.captures.forEach((img, i) => {
+                if (i >= cols*rows) return;
+                let x, y, w, h;
+                if (layout === 'strip') { w = pW/2; h = pH/2; x = padding; y = padding + i*(h+gap); }
+                else if (layout === 'single') { w = pW; h = pH; x = padding; y = padding; }
+                else { w = pW; h = pH; x = padding + (i % cols)*(w+gap); y = padding + Math.floor(i/cols)*(h+gap); }
+                
+                ctx.save();
+                ctx.translate(x + w/2, y + h/2);
+                if (state.edit.flipHorizontal) {
+                    ctx.scale(-1, 1); 
+                }
+                ctx.drawImage(img, -w/2, -h/2, w, h);
+                ctx.restore();
+            });
+            ctx.filter = 'none';
+
+            // FOOTER
+            const isDark = state.edit.frameColor === '#111827';
+            ctx.fillStyle = isDark ? '#ffffff' : '#111827';
+            
+            // Title (Higher up)
+            // If upload mode, title is centered in 80px footer (~40px y + offset)
+            const titleY = isUploadMode ? (cH - currentFooter + 50) : (cH - currentFooter + 50);
+            ctx.font = 'bold 40px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(state.edit.text || 'Photobooth', cW/2, titleY);
+
+            // Stickers
+            state.stickers.forEach(s => {
+                ctx.save();
+                ctx.font = `${80 * s.scale}px sans-serif`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.translate(s.x * cW, s.y * cH);
+                ctx.fillText(s.text, 0, 0);
+                ctx.restore();
+            });
+
+            // SKIP QR IF UPLOAD MODE
+            if (isUploadMode) return;
+
+            // QR Code Area - COMPACT & CORNER & BELOW TITLE
+            const qrSize = 80; 
+            const qrX = cW - qrSize - 20;
+            const qrY = cH - qrSize - 30;
+
+            // QR Background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(qrX, qrY, qrSize, qrSize);
+            ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+            ctx.strokeRect(qrX, qrY, qrSize, qrSize);
+
+            if (state.qrCodeImg) {
+                ctx.drawImage(state.qrCodeImg, qrX, qrY, qrSize, qrSize);
+            } else {
+                 // Placeholder State
+                 ctx.fillStyle = '#f9fafb';
+                 ctx.fillRect(qrX, qrY, qrSize, qrSize);
+                 ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                 ctx.fillStyle = '#9ca3af';
+                 const statusText = state.isUploaded ? "ĐÃ TẢI" : "ĐANG TẠO";
+                 const subText = state.isUploaded ? "XONG" : "QR...";
+                 ctx.fillText(statusText, qrX + qrSize/2, qrY + qrSize/2 - 5);
+                 ctx.fillText(subText, qrX + qrSize/2, qrY + qrSize/2 + 5);
+            }
+
+            // Date (Below QR)
+            if (state.edit.showDate) {
+                ctx.font = '10px Inter'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+                ctx.fillStyle = isDark ? '#999' : '#666';
+                ctx.fillText(new Date().toLocaleDateString('vi-VN'), qrX + qrSize/2, qrY + qrSize + 15);
+            }
+        }
+
+        // --- STICKER LOGIC ---
+        function addSticker(emoji) {
+            state.stickers.push({ text: emoji, x: 0.5, y: 0.5, scale: 1 });
+            renderComposite(false);
+        }
+        function clearStickers() { state.stickers = []; renderComposite(false); }
+        
+        function getPos(e) {
+            const rect = els.mainCanvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: (clientX - rect.left) / rect.width, y: (clientY - rect.top) / rect.height };
+        }
+        function startDrag(e) {
+            const p = getPos(e);
+            const idx = state.stickers.findIndex(s => Math.abs(s.x - p.x) < 0.1 && Math.abs(s.y - p.y) < 0.1);
+            if(idx !== -1) { state.drag = { active: true, idx }; }
+        }
+        function drag(e) {
+            if(!state.drag.active) return;
+            e.preventDefault();
+            const p = getPos(e);
+            state.stickers[state.drag.idx].x = p.x;
+            state.stickers[state.drag.idx].y = p.y;
+            renderComposite(false);
+        }
+        function endDrag() { state.drag.active = false; }
+
+        // --- UTILS ---
+        function switchScreen(name) {
+            Object.values(els.screens).forEach(e => e.classList.add('hidden'));
+            els.screens[name].classList.remove('hidden');
+            els.stepIndicator.innerText = name.toUpperCase();
+            if(name==='setup') els.btnBack.classList.add('hidden'); else els.btnBack.classList.remove('hidden');
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
+            document.getElementById(`tab-${name}`).classList.remove('hidden');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('text-gray-900', b.dataset.tab===name));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('text-gray-400', b.dataset.tab!==name));
+        }
+
+        function goBack() { if(confirm("Hủy bỏ ảnh hiện tại?")) resetApp(); }
+        function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+        function showToast(m, isError = false) { 
+            const t=document.getElementById('toast'); 
+            t.querySelector('span').innerText=m; 
+            if(isError) { t.classList.remove('translate-x-full'); setTimeout(()=>t.classList.add('translate-x-full'), 3000); }
+        }
+        function downloadVideo() { if(state.timelapse.blob) { const a=document.createElement('a'); a.download=`time_${Date.now()}.webm`; a.href=URL.createObjectURL(state.timelapse.blob); a.click(); } }
+        
+        function selectLayout(t) { state.settings.layout=t; document.querySelectorAll('.layout-btn').forEach(b => { if(b.dataset.type===t) { b.classList.add('ring-2','ring-gray-900','bg-gray-100'); b.classList.remove('border-gray-200'); } else { b.classList.remove('ring-2','ring-gray-900','bg-gray-100'); b.classList.add('border-gray-200'); } }); }
+        function updateText(v) { state.edit.text=v; renderComposite(false); }
+        function setFrameColor(c) { state.edit.frameColor=c; renderComposite(false); }
+        function applyPreset(n) { const d={brightness:100,contrast:100,saturate:100,sepia:0,grayscale:0}; let s=state.edit.filters; if(n==='normal')Object.assign(s,d); if(n==='bw')Object.assign(s,{...d,grayscale:100,contrast:120}); if(n==='warm')Object.assign(s,{...d,sepia:40,brightness:105}); if(n==='vintage')Object.assign(s,{...d,sepia:80,contrast:90,brightness:90}); if(n==='cool')Object.assign(s,{...d,saturate:80,brightness:105}); if(n==='dramatic')Object.assign(s,{...d,contrast:140,saturate:120}); renderComposite(false); }
+        function updateFilter(k,v) { state.edit.filters[k]=v; renderComposite(false); }
+        function getRequiredPhotos() { const m={single:1,strip:3,grid:4,grid6:6,grid8:8}; return m[state.settings.layout]||1; }
+        function toggleDate() { state.edit.showDate = document.getElementById('show-date').checked; renderComposite(false); }
+        function toggleFlip() { state.edit.flipHorizontal = !state.edit.flipHorizontal; renderComposite(false); }
+
+        window.onload = initCamera;
+        
+        // Auto Reset after Print
+        window.onafterprint = function() {
+            setTimeout(resetApp, 1000);
+        };
+    </script>
+    <style> .preset-btn { height: 40px; border-radius: 8px; font-size: 10px; font-weight: 600; transition: all 0.2s; } .preset-btn:hover { transform: scale(1.05); } </style>
+</body>
+</html>
