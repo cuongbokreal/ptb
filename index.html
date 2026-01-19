@@ -29,7 +29,6 @@
                     },
                     animation: {
                         'flash-soft': 'flashSoft 0.3s ease-out forwards',
-                        'bounce-slow': 'bounce 3s infinite',
                     },
                     keyframes: {
                         flashSoft: {
@@ -422,18 +421,64 @@
 
         async function initCamera() {
             try {
+                // 1. Xin quyền truy cập Camera ngay lập tức để browser hiển thị tên thiết bị (Label)
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(track => track.stop());
+
+                // 2. Liệt kê thiết bị
+                await populateCameraList();
+
+                // 3. Tự động cập nhật nếu cắm/rút camera
+                navigator.mediaDevices.ondevicechange = populateCameraList;
+
+            } catch (e) { 
+                console.error(e);
+                showToast("Vui lòng cho phép truy cập Camera!", true); 
+            }
+        }
+
+        async function populateCameraList() {
+            try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoDevices = devices.filter(d => d.kind === 'videoinput');
                 const select = document.getElementById('camera-select');
+                
+                const currentSelection = select.value;
                 select.innerHTML = '';
+                
+                if (videoDevices.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.text = "Không tìm thấy camera";
+                    select.appendChild(opt);
+                    return;
+                }
+
+                let targetId = null;
+
                 videoDevices.forEach((d, i) => {
                     const opt = document.createElement('option');
                     opt.value = d.deviceId;
-                    opt.text = d.label || `Camera ${i + 1}`;
+                    opt.text = d.label || `Camera ${i + 1} (${d.deviceId.slice(0,5)}...)`;
                     select.appendChild(opt);
+
+                    // Tìm camera ưu tiên (Sony A7 IV)
+                    if (d.label.includes("ILCE-7M4") || d.label.includes("054c:0de7")) {
+                        targetId = d.deviceId;
+                    }
                 });
-                if (videoDevices.length > 0 && !state.camera.id) state.camera.id = videoDevices[0].deviceId;
-            } catch (e) { showToast("Lỗi camera", true); }
+
+                if (targetId) {
+                    select.value = targetId;
+                } else if (currentSelection && Array.from(select.options).some(opt => opt.value === currentSelection)) {
+                    select.value = currentSelection;
+                } else {
+                    select.value = videoDevices[0].deviceId;
+                }
+                
+                state.camera.id = select.value;
+            } catch (e) {
+                console.error("Lỗi liệt kê thiết bị:", e);
+            }
         }
 
         async function startStream() {
@@ -443,14 +488,21 @@
             }
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { deviceId: state.camera.id ? { exact: state.camera.id } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    video: { 
+                        deviceId: state.camera.id ? { exact: state.camera.id } : undefined, 
+                        width: { ideal: 1920 }, // Nâng lên Full HD để nét hơn
+                        height: { ideal: 1080 } 
+                    },
                     audio: false
                 });
                 state.camera.stream = stream;
                 els.video.srcObject = stream;
                 await new Promise(r => els.video.onloadedmetadata = r);
                 els.video.play();
-            } catch (e) { showToast("Không mở được camera", true); }
+            } catch (e) { 
+                console.error(e);
+                showToast("Không mở được camera này. Thử camera khác!", true); 
+            }
         }
 
         function updateCounter() {
@@ -650,6 +702,13 @@
 
         async function startPhotobooth() {
             state.settings.timer = parseInt(document.getElementById('timer-select').value);
+            
+            // CẬP NHẬT QUAN TRỌNG: Lấy đúng ID camera đang chọn trong dropdown
+            const selectedCamId = document.getElementById('camera-select').value;
+            if (selectedCamId) {
+                state.camera.id = selectedCamId;
+            }
+
             await startStream();
             state.captures = [];
             state.stickers = [];
@@ -835,7 +894,7 @@
                 ctx.restore();
             });
 
-            // SKIP QR & DATE IF UPLOAD MODE (Clean image for cloud)
+            // SKIP QR IF UPLOAD MODE
             if (isUploadMode) return;
 
             // QR Code Area
